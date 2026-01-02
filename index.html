@@ -609,7 +609,8 @@
             <div style="line-height: 1.8; color: var(--text-dark);">
                 <p style="margin-bottom: 15px;"><strong>Real-time updates:</strong> When you or your partner adds an entry, it appears automatically on both devices!</p>
                 <p style="margin-bottom: 15px;"><strong>Always in sync:</strong> No more manual export/import needed</p>
-                <p style="margin-bottom: 0;"><strong>Works offline too:</strong> Entries sync automatically when you're back online</p>
+                <p style="margin-bottom: 15px;"><strong>Works offline too:</strong> Entries sync automatically when you're back online</p>
+                <p style="margin-bottom: 0;"><strong>Timezone-safe:</strong> Times display correctly no matter where you're viewing from</p>
             </div>
         </div>
     </div>
@@ -759,6 +760,39 @@
     </script>
 
     <script>
+        // Convert local datetime input to Unix timestamp
+        function localDateTimeToTimestamp(localDateTimeString) {
+            // Parse the datetime-local value as a local time and get Unix timestamp
+            const date = new Date(localDateTimeString);
+            return date.getTime();
+        }
+
+        // Format a Unix timestamp to the viewer's local time
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric', 
+                hour: 'numeric', 
+                minute: '2-digit',
+                hour12: true 
+            });
+        }
+
+        // Get the start of today in the viewer's local timezone (as Unix timestamp)
+        function getStartOfToday() {
+            const now = new Date();
+            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            return startOfDay.getTime();
+        }
+
+        // Get the end of today in the viewer's local timezone (as Unix timestamp)
+        function getEndOfToday() {
+            const now = new Date();
+            const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+            return endOfDay.getTime();
+        }
+
         function setCurrentDateTime() {
             const now = new Date();
             now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -766,8 +800,14 @@
         }
 
         function updateStats() {
-            const today = new Date().toDateString();
-            const todayEntries = entries.filter(e => new Date(e.datetime).toDateString() === today);
+            const startOfToday = getStartOfToday();
+            const endOfToday = getEndOfToday();
+            
+            // Filter entries that fall within today in the viewer's local timezone
+            const todayEntries = entries.filter(e => {
+                const entryTime = e.timestamp;
+                return entryTime >= startOfToday && entryTime <= endOfToday;
+            });
             
             document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', { 
                 month: 'short', 
@@ -803,16 +843,10 @@
             }
 
             tbody.innerHTML = entries
-                .sort((a, b) => new Date(b.datetime) - new Date(a.datetime))
+                .sort((a, b) => b.timestamp - a.timestamp)
                 .map((entry, index) => {
-                    const date = new Date(entry.datetime);
-                    const formattedDate = date.toLocaleDateString('en-US', { 
-                        month: 'short', 
-                        day: 'numeric', 
-                        hour: 'numeric', 
-                        minute: '2-digit',
-                        hour12: true 
-                    });
+                    // Use the timezone-safe timestamp for display
+                    const formattedDate = formatTimestamp(entry.timestamp);
                     
                     const fedBadge = entry.fed === 'Yes' 
                         ? '<span class="badge badge-yes">Yes</span>' 
@@ -858,14 +892,18 @@
         document.getElementById('babyForm').addEventListener('submit', (e) => {
             e.preventDefault();
             
+            const datetimeValue = document.getElementById('datetime').value;
+            
             const entry = {
-                datetime: document.getElementById('datetime').value,
+                // Store the Unix timestamp (timezone-independent)
+                timestamp: localDateTimeToTimestamp(datetimeValue),
+                // Keep the original datetime string for reference/debugging
+                datetimeLocal: datetimeValue,
                 fed: document.getElementById('fed').value,
                 amount: document.getElementById('amount').value,
                 changed: document.getElementById('changed').value,
                 diaperState: document.getElementById('diaperState').value,
-                notes: document.getElementById('notes').value,
-                timestamp: Date.now()
+                notes: document.getElementById('notes').value
             };
             
             addEntry(entry);
@@ -885,7 +923,7 @@
             const csvContent = [
                 headers.join(','),
                 ...entries.map(e => [
-                    new Date(e.datetime).toLocaleString(),
+                    formatTimestamp(e.timestamp),
                     e.fed,
                     e.amount || '',
                     e.changed,
