@@ -298,8 +298,7 @@
             border-radius: 0 0 12px 0;
         }
 
-        .delete-btn {
-            background: #FF6B6B;
+        .delete-btn, .edit-btn {
             color: white;
             border: none;
             padding: 6px 12px;
@@ -309,10 +308,24 @@
             font-weight: 600;
             font-size: 0.85rem;
             transition: all 0.3s ease;
+            margin-right: 5px;
+        }
+
+        .delete-btn {
+            background: #FF6B6B;
         }
 
         .delete-btn:hover {
             background: #FF5252;
+            transform: scale(1.05);
+        }
+
+        .edit-btn {
+            background: #4CAF50;
+        }
+
+        .edit-btn:hover {
+            background: #45a049;
             transform: scale(1.05);
         }
 
@@ -526,7 +539,7 @@
         </div>
 
         <div class="card">
-            <h2>Add New Entry</h2>
+            <h2 id="formTitle">Add New Entry</h2>
             <form id="babyForm">
                 <div class="form-grid">
                     <div class="form-group">
@@ -566,7 +579,8 @@
                     </div>
                 </div>
                 <div class="button-group">
-                    <button type="submit" class="btn btn-primary">Add Entry</button>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Add Entry</button>
+                    <button type="button" class="btn btn-secondary" id="cancelEditBtn" onclick="cancelEdit()" style="display: none;">Cancel</button>
                     <button type="button" class="btn btn-secondary" onclick="exportData()">Export CSV</button>
                     <button type="button" class="btn btn-secondary" onclick="showSetup()">⚙️ Sync Settings</button>
                     <button type="button" class="btn btn-secondary" onclick="clearAllData()">Clear All</button>
@@ -754,6 +768,68 @@
             }
         };
 
+        window.editingEntryId = null;
+        window.editingEntryIndex = null;
+
+        window.editEntry = function(id, index) {
+            const entry = window.entries[index];
+            if (!entry) return;
+
+            // Store which entry we're editing
+            window.editingEntryId = id;
+            window.editingEntryIndex = index;
+
+            // Convert timestamp back to datetime-local format
+            const date = new Date(entry.timestamp);
+            date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+            document.getElementById('datetime').value = date.toISOString().slice(0, 16);
+
+            // Populate form fields
+            document.getElementById('fed').value = entry.fed;
+            document.getElementById('amount').value = entry.amount || '';
+            document.getElementById('changed').value = entry.changed;
+            document.getElementById('diaperState').value = entry.diaperState || '';
+            document.getElementById('notes').value = entry.notes || '';
+
+            // Update UI to show we're editing
+            document.getElementById('formTitle').textContent = 'Edit Entry';
+            document.getElementById('submitBtn').textContent = 'Update Entry';
+            document.getElementById('cancelEditBtn').style.display = 'inline-block';
+
+            // Scroll to form
+            document.getElementById('babyForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        };
+
+        window.cancelEdit = function() {
+            window.editingEntryId = null;
+            window.editingEntryIndex = null;
+
+            // Reset form
+            document.getElementById('babyForm').reset();
+            setCurrentDateTime();
+
+            // Update UI back to add mode
+            document.getElementById('formTitle').textContent = 'Add New Entry';
+            document.getElementById('submitBtn').textContent = 'Add Entry';
+            document.getElementById('cancelEditBtn').style.display = 'none';
+        };
+
+        window.updateEntry = async function(entry, id, index) {
+            if (isConnected && db && id) {
+                // Update in Firebase
+                const entryRef = ref(db, `entries/${id}`);
+                await set(entryRef, entry);
+                showToast('Entry updated and synced! ✨');
+            } else {
+                // Update in localStorage
+                window.entries[index] = entry;
+                localStorage.setItem('babyEntries', JSON.stringify(window.entries));
+                updateStats();
+                renderEntries();
+                showToast('Entry updated (offline) 📝');
+            }
+        };
+
         // Initialize
         window.entries = [];
         initializeFirebase();
@@ -870,7 +946,10 @@
                             <td>${changedBadge}</td>
                             <td>${stateBadge}</td>
                             <td>${entry.notes || '--'}</td>
-                            <td><button class="delete-btn" onclick="deleteEntryById('${entry.id || ''}', ${index})">Delete</button></td>
+                            <td>
+                                <button class="edit-btn" onclick="editEntry('${entry.id || ''}', ${index})">Edit</button>
+                                <button class="delete-btn" onclick="deleteEntryById('${entry.id || ''}', ${index})">Delete</button>
+                            </td>
                         </tr>
                     `;
                 })
@@ -891,9 +970,9 @@
 
         document.getElementById('babyForm').addEventListener('submit', (e) => {
             e.preventDefault();
-            
+
             const datetimeValue = document.getElementById('datetime').value;
-            
+
             const entry = {
                 // Store the Unix timestamp (timezone-independent)
                 timestamp: localDateTimeToTimestamp(datetimeValue),
@@ -905,9 +984,17 @@
                 diaperState: document.getElementById('diaperState').value,
                 notes: document.getElementById('notes').value
             };
-            
-            addEntry(entry);
-            
+
+            // Check if we're editing or adding
+            if (window.editingEntryId !== null || window.editingEntryIndex !== null) {
+                // Update existing entry
+                updateEntry(entry, window.editingEntryId, window.editingEntryIndex);
+                cancelEdit();
+            } else {
+                // Add new entry
+                addEntry(entry);
+            }
+
             // Reset form
             document.getElementById('babyForm').reset();
             setCurrentDateTime();
