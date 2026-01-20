@@ -491,648 +491,220 @@
         }
     </style>
 </head>
-<body>
-    <div id="setupModal" class="setup-modal" style="display: none;">
-        <div class="setup-content">
-            <h2>🔗 Connect to Live Sync</h2>
-            <p style="margin-bottom: 20px; color: var(--text-muted);">
-                Enter your Firebase connection code to enable real-time syncing between devices. 
-                Get this from the setup instructions.
-            </p>
-            
-            <label for="firebaseKey">Firebase API Key:</label>
-            <input type="text" id="firebaseKey" placeholder="AIza...">
-            
-            <label for="firebaseDomain">Auth Domain:</label>
-            <input type="text" id="firebaseDomain" placeholder="your-app.firebaseapp.com">
-            
-            <label for="firebaseUrl">Database URL:</label>
-            <input type="text" id="firebaseUrl" placeholder="https://your-app.firebaseio.com">
-            
-            <label for="firebaseProject">Project ID:</label>
-            <input type="text" id="firebaseProject" placeholder="your-app">
-            
-            <div class="button-group">
-                <button class="btn btn-primary" onclick="saveFirebaseConfig()">Connect</button>
-                <button class="btn btn-secondary" onclick="closeSetup()">Skip (Use Offline)</button>
-            </div>
+<!-- ================= SETUP MODAL ================= -->
+<div id="setupModal" class="setup-modal" style="display:none;">
+    <div class="setup-content">
+        <h2>🔗 Connect to Live Sync</h2>
+
+        <label>Firebase API Key</label>
+        <input id="firebaseKey">
+
+        <label>Auth Domain</label>
+        <input id="firebaseDomain">
+
+        <label>Database URL</label>
+        <input id="firebaseUrl">
+
+        <label>Project ID</label>
+        <input id="firebaseProject">
+
+        <div class="button-group">
+            <button class="btn btn-primary" onclick="saveFirebaseConfig()">Connect</button>
+            <button class="btn btn-secondary" onclick="closeSetup()">Offline</button>
         </div>
     </div>
+</div>
+
+<div class="container">
+<header>
+<h1>🍼 Baby Tracker</h1>
+<div class="sync-status">
+<div class="sync-dot" id="syncDot"></div>
+<span id="syncStatus">Checking connection...</span>
+</div>
+</header>
+
+<!-- ================= FORM ================= -->
+<div class="card">
+<h2 id="formTitle">Add New Entry</h2>
+
+<form id="babyForm">
+<div class="form-grid">
+<input type="datetime-local" id="datetime" required>
+<select id="fed"><option>No</option><option>Yes</option></select>
+<input type="number" id="amount" step="0.5">
+<select id="changed"><option>No</option><option>Yes</option></select>
+<select id="diaperState"><option></option><option>Wet</option><option>Poopy</option><option>Both</option></select>
+<select id="sleepStatus"><option></option><option>Asleep</option><option>Awake</option></select>
+<input id="notes" placeholder="Notes">
+</div>
+
+<div class="button-group">
+<button class="btn btn-primary" id="submitBtn">Add Entry</button>
+<button class="btn btn-secondary" type="button" id="cancelEditBtn" onclick="cancelEdit()" style="display:none;">Cancel</button>
+<button class="btn btn-secondary" type="button" onclick="exportData()">Export CSV</button>
+<button class="btn btn-secondary" type="button" onclick="showSetup()">⚙️ Sync</button>
+<button class="btn btn-secondary" type="button" onclick="clearAllData()">Clear All</button>
+</div>
+</form>
+</div>
+
+<!-- ================= TABLE ================= -->
+<div class="card">
+<table>
+<thead>
+<tr>
+<th>Date</th><th>Fed</th><th>Amount</th><th>Changed</th><th>State</th><th>Sleep</th><th>Notes</th><th></th>
+</tr>
+</thead>
+<tbody id="entriesBody"></tbody>
+</table>
+</div>
+</div>
+
+<!-- ================= FIREBASE ================= -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getDatabase, ref, push, onValue, remove, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+let db=null, entriesRef=null, isConnected=false;
+window.entries=[];
+window.editingEntryId=null;
+window.editingEntryIndex=null;
+
+function updateSyncStatus(t, on){
+document.getElementById('syncStatus').textContent=t;
+document.getElementById('syncDot').classList.toggle('offline', !on);
+}
+
+function initializeFirebase(){
+const cfg=JSON.parse(localStorage.getItem('firebaseConfig'));
+if(!cfg){loadLocalData();updateSyncStatus('Offline Mode',false);return;}
+const app=initializeApp(cfg);
+db=getDatabase(app);
+entriesRef=ref(db,'entries');
+onValue(entriesRef,s=>{
+entries=s.val()?Object.entries(s.val()).map(([id,e])=>({...e,id})):[];
+updateStats();renderEntries();
+});
+isConnected=true;
+updateSyncStatus('Live Sync',true);
+}
+
+function loadLocalData(){
+entries=JSON.parse(localStorage.getItem('babyEntries'))||[];
+updateStats();renderEntries();
+}
+
+window.saveFirebaseConfig=()=>{
+localStorage.setItem('firebaseConfig',JSON.stringify({
+apiKey:firebaseKey.value,
+authDomain:firebaseDomain.value,
+databaseURL:firebaseUrl.value,
+projectId:firebaseProject.value
+}));
+location.reload();
+};
+
+window.showSetup=()=>setupModal.style.display='flex';
+window.closeSetup=()=>setupModal.style.display='none';
+
+window.addEntry=async e=>{
+if(isConnected){await push(entriesRef,e);}
+else{entries.push(e);localStorage.setItem('babyEntries',JSON.stringify(entries));}
+updateStats();renderEntries();
+};
+
+window.updateEntry=async(e,id,i)=>{
+if(isConnected){await set(ref(db,`entries/${id}`),e);}
+else{entries[i]=e;localStorage.setItem('babyEntries',JSON.stringify(entries));}
+updateStats();renderEntries();
+};
+
+window.deleteEntryById=async id=>{
+if(!confirm('Delete entry?'))return;
+const i=entries.findIndex(e=>e.id===id);
+if(isConnected) await remove(ref(db,`entries/${id}`));
+else if(i>-1){entries.splice(i,1);localStorage.setItem('babyEntries',JSON.stringify(entries));}
+updateStats();renderEntries();
+};
+
+window.editEntry=id=>{
+const i=entries.findIndex(e=>e.id===id);
+if(i<0)return;
+const e=entries[i];
+editingEntryId=id;editingEntryIndex=i;
+const d=new Date(e.timestamp);
+datetime.value=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+fed.value=e.fed;amount.value=e.amount||'';changed.value=e.changed;
+diaperState.value=e.diaperState||'';sleepStatus.value=e.sleepStatus||'';notes.value=e.notes||'';
+formTitle.textContent='Edit Entry';submitBtn.textContent='Update Entry';
+cancelEditBtn.style.display='inline-block';
+};
+
+window.cancelEdit=()=>{
+editingEntryId=null;editingEntryIndex=null;
+babyForm.reset();setCurrentDateTime();
+formTitle.textContent='Add New Entry';submitBtn.textContent='Add Entry';
+cancelEditBtn.style.display='none';
+};
+
+initializeFirebase();
+</script>
+
+<!-- ================= LOGIC ================= -->
+<script>
+function localDateTimeToTimestamp(v){return new Date(v).getTime();}
+function formatTimestamp(t){return new Date(t).toLocaleString();}
+function setCurrentDateTime(){
+const n=new Date();n.setMinutes(n.getMinutes()-n.getTimezoneOffset());
+datetime.value=n.toISOString().slice(0,16);
+}
+
+function updateStats(){}
+
+function renderEntries(){
+entriesBody.innerHTML=entries.sort((a,b)=>b.timestamp-a.timestamp).map(e=>`
+<tr>
+<td>${formatTimestamp(e.timestamp)}</td>
+<td>${e.fed}</td>
+<td>${e.amount||'--'}</td>
+<td>${e.changed}</td>
+<td>${e.diaperState||'--'}</td>
+<td>${e.sleepStatus||'--'}</td>
+<td>${e.notes||''}</td>
+<td>
+<button onclick="editEntry('${e.id}')">Edit</button>
+<button onclick="deleteEntryById('${e.id}')">Delete</button>
+</td>
+</tr>`).join('');
+}
+
+babyForm.addEventListener('submit',e=>{
+e.preventDefault();
+const entry={
+timestamp:localDateTimeToTimestamp(datetime.value),
+datetimeLocal:datetime.value,
+fed:fed.value,amount:amount.value,
+changed:changed.value,
+diaperState:diaperState.value,
+sleepStatus:sleepStatus.value,
+notes:notes.value
+};
+editingEntryId?updateEntry(entry,editingEntryId,editingEntryIndex):addEntry(entry);
+cancelEdit();
+});
+
+function exportData(){}
+function clearAllData(){
+if(!confirm('Clear all data?'))return;
+if(isConnected) remove(entriesRef);
+else localStorage.removeItem('babyEntries');
+entries=[];renderEntries();
+}
+
+setCurrentDateTime();
+</script>
 
-    <div class="container">
-        <header>
-            <h1>🍼 Baby Tracker</h1>
-            <p class="subtitle">Track feedings & diaper changes with love</p>
-            <div class="sync-status">
-                <div class="sync-dot" id="syncDot"></div>
-                <span id="syncStatus">Checking connection...</span>
-            </div>
-        </header>
-
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Today's Date</div>
-                <div class="stat-value" id="currentDate">--</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total Feedings</div>
-                <div class="stat-value" id="totalFeedings">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Formula (oz)</div>
-                <div class="stat-value" id="totalFormula">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Diaper Changes</div>
-                <div class="stat-value" id="totalChanges">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total Sleep (hrs)</div>
-                <div class="stat-value" id="totalSleep">0</div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2 id="formTitle">Add New Entry</h2>
-            <form id="babyForm">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="datetime">Date & Time</label>
-                        <input type="datetime-local" id="datetime" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="fed">Fed?</label>
-                        <select id="fed">
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="amount">Amount (oz)</label>
-                        <input type="number" id="amount" step="0.5" min="0" placeholder="0.0">
-                    </div>
-                    <div class="form-group">
-                        <label for="changed">Changed?</label>
-                        <select id="changed">
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="diaperState">Diaper State</label>
-                        <select id="diaperState">
-                            <option value="">--</option>
-                            <option value="Wet">Wet</option>
-                            <option value="Poopy">Poopy</option>
-                            <option value="Both">Both</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="sleepStatus">Sleep Status</label>
-                        <select id="sleepStatus">
-                            <option value="">--</option>
-                            <option value="Asleep">Fell Asleep</option>
-                            <option value="Awake">Woke Up</option>
-                        </select>
-                    </div>
-                    <div class="form-group note-input">
-                        <label for="notes">Notes</label>
-                        <input type="text" id="notes" placeholder="Any observations...">
-                    </div>
-                </div>
-                <div class="button-group">
-                    <button type="submit" class="btn btn-primary" id="submitBtn">Add Entry</button>
-                    <button type="button" class="btn btn-secondary" id="cancelEditBtn" onclick="cancelEdit()" style="display: none;">Cancel</button>
-                    <button type="button" class="btn btn-secondary" onclick="exportData()">Export CSV</button>
-                    <button type="button" class="btn btn-secondary" onclick="showSetup()">⚙️ Sync Settings</button>
-                    <button type="button" class="btn btn-secondary" onclick="clearAllData()">Clear All</button>
-                </div>
-            </form>
-        </div>
-
-        <div class="card">
-            <h2>Recent Entries</h2>
-            <div style="overflow-x: auto;">
-                <table id="entriesTable">
-                    <thead>
-                        <tr>
-                            <th>Date/Time</th>
-                            <th>Fed?</th>
-                            <th>Amount</th>
-                            <th>Changed?</th>
-                            <th>State</th>
-                            <th>Sleep</th>
-                            <th>Notes</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="entriesBody">
-                        <tr>
-                            <td colspan="8" class="empty-state">
-                                <svg fill="currentColor" viewBox="0 0 20 20">
-                                    <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
-                                    <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
-                                </svg>
-                                <p>No entries yet. Add your first entry above!</p>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="card" style="background: linear-gradient(135deg, #E8F5E9 0%, #C8E6C9 100%); border: 2px dashed #4CAF50;">
-            <h2>✨ Live Sync Enabled!</h2>
-            <div style="line-height: 1.8; color: var(--text-dark);">
-                <p style="margin-bottom: 15px;"><strong>Real-time updates:</strong> When you or your partner adds an entry, it appears automatically on both devices!</p>
-                <p style="margin-bottom: 15px;"><strong>Always in sync:</strong> No more manual export/import needed</p>
-                <p style="margin-bottom: 15px;"><strong>Works offline too:</strong> Entries sync automatically when you're back online</p>
-                <p style="margin-bottom: 0;"><strong>Timezone-safe:</strong> Times display correctly no matter where you're viewing from</p>
-            </div>
-        </div>
-    </div>
-
-    <script type="module">
-        // Firebase will be initialized here
-        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getDatabase, ref, push, onValue, remove, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
-
-        let db = null;
-        let entriesRef = null;
-        let isConnected = false;
-
-        function updateSyncStatus(status, isOnline) {
-            const dot = document.getElementById('syncDot');
-            const statusText = document.getElementById('syncStatus');
-            
-            statusText.textContent = status;
-            if (isOnline) {
-                dot.classList.remove('offline');
-            } else {
-                dot.classList.add('offline');
-            }
-        }
-
-        function initializeFirebase() {
-            const config = JSON.parse(localStorage.getItem('firebaseConfig'));
-            
-            if (!config) {
-                updateSyncStatus('Offline Mode - Click Sync Settings', false);
-                document.getElementById('setupModal').style.display = 'flex';
-                loadLocalData();
-                return;
-            }
-
-            try {
-                const firebaseConfig = {
-                    apiKey: config.apiKey,
-                    authDomain: config.authDomain,
-                    databaseURL: config.databaseURL,
-                    projectId: config.projectId
-                };
-
-                const app = initializeApp(firebaseConfig);
-                db = getDatabase(app);
-                entriesRef = ref(db, 'entries');
-                
-                // Listen for changes
-                onValue(entriesRef, (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        window.entries = Object.entries(data).map(([id, entry]) => ({
-                            ...entry,
-                            id: id
-                        }));
-                    } else {
-                        window.entries = [];
-                    }
-                    updateStats();
-                    renderEntries();
-                });
-
-                isConnected = true;
-                updateSyncStatus('Live - Auto Syncing', true);
-            } catch (error) {
-                console.error('Firebase init error:', error);
-                updateSyncStatus('Connection Error - Using Offline', false);
-                loadLocalData();
-            }
-        }
-
-        function loadLocalData() {
-            window.entries = JSON.parse(localStorage.getItem('babyEntries')) || [];
-            updateStats();
-            renderEntries();
-        }
-
-        window.saveFirebaseConfig = function() {
-            const config = {
-                apiKey: document.getElementById('firebaseKey').value,
-                authDomain: document.getElementById('firebaseDomain').value,
-                databaseURL: document.getElementById('firebaseUrl').value,
-                projectId: document.getElementById('firebaseProject').value
-            };
-
-            if (!config.apiKey || !config.authDomain || !config.databaseURL || !config.projectId) {
-                alert('Please fill in all fields');
-                return;
-            }
-
-            localStorage.setItem('firebaseConfig', JSON.stringify(config));
-            document.getElementById('setupModal').style.display = 'none';
-            location.reload();
-        };
-
-        window.showSetup = function() {
-            const config = JSON.parse(localStorage.getItem('firebaseConfig'));
-            if (config) {
-                document.getElementById('firebaseKey').value = config.apiKey;
-                document.getElementById('firebaseDomain').value = config.authDomain;
-                document.getElementById('firebaseUrl').value = config.databaseURL;
-                document.getElementById('firebaseProject').value = config.projectId;
-            }
-            document.getElementById('setupModal').style.display = 'flex';
-        };
-
-        window.closeSetup = function() {
-            document.getElementById('setupModal').style.display = 'none';
-        };
-
-        window.addEntry = async function(entry) {
-            if (isConnected && db) {
-                // Add to Firebase
-                await push(entriesRef, entry);
-                showToast('Entry added and synced! 🎉');
-            } else {
-                // Add to localStorage
-                window.entries.push(entry);
-                localStorage.setItem('babyEntries', JSON.stringify(window.entries));
-                updateStats();
-                renderEntries();
-                showToast('Entry added (offline) 📝');
-            }
-        };
-
-        window.deleteEntryById = async function(id, index) {
-            if (!confirm('Are you sure you want to delete this entry?')) return;
-
-            if (isConnected && db && id) {
-                // Delete from Firebase
-                const entryRef = ref(db, `entries/${id}`);
-                await remove(entryRef);
-                showToast('Entry deleted and synced');
-            } else {
-                // Delete from localStorage
-                window.entries.splice(index, 1);
-                localStorage.setItem('babyEntries', JSON.stringify(window.entries));
-                updateStats();
-                renderEntries();
-                showToast('Entry deleted (offline)');
-            }
-        };
-
-        window.editingEntryId = null;
-        window.editingEntryIndex = null;
-
-        window.editEntry = function(id, index) {
-            const entry = window.entries[index];
-            if (!entry) return;
-
-            // Store which entry we're editing
-            window.editingEntryId = id;
-            window.editingEntryIndex = index;
-
-            // Convert timestamp back to datetime-local format
-            const date = new Date(entry.timestamp);
-            // Format as YYYY-MM-DDTHH:mm for datetime-local input
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(date.getMinutes()).padStart(2, '0');
-            document.getElementById('datetime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
-
-            // Populate form fields
-            document.getElementById('fed').value = entry.fed;
-            document.getElementById('amount').value = entry.amount || '';
-            document.getElementById('changed').value = entry.changed;
-            document.getElementById('diaperState').value = entry.diaperState || '';
-            document.getElementById('sleepStatus').value = entry.sleepStatus || '';
-            document.getElementById('notes').value = entry.notes || '';
-
-            // Update UI to show we're editing
-            document.getElementById('formTitle').textContent = 'Edit Entry';
-            document.getElementById('submitBtn').textContent = 'Update Entry';
-            document.getElementById('cancelEditBtn').style.display = 'inline-block';
-
-            // Scroll to form
-            document.getElementById('babyForm').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        };
-
-        window.cancelEdit = function() {
-            window.editingEntryId = null;
-            window.editingEntryIndex = null;
-
-            // Reset form
-            document.getElementById('babyForm').reset();
-            setCurrentDateTime();
-
-            // Update UI back to add mode
-            document.getElementById('formTitle').textContent = 'Add New Entry';
-            document.getElementById('submitBtn').textContent = 'Add Entry';
-            document.getElementById('cancelEditBtn').style.display = 'none';
-        };
-
-        window.updateEntry = async function(entry, id, index) {
-            if (isConnected && db && id) {
-                // Update in Firebase
-                const entryRef = ref(db, `entries/${id}`);
-                await set(entryRef, entry);
-                showToast('Entry updated and synced! ✨');
-            } else {
-                // Update in localStorage
-                window.entries[index] = entry;
-                localStorage.setItem('babyEntries', JSON.stringify(window.entries));
-                updateStats();
-                renderEntries();
-                showToast('Entry updated (offline) 📝');
-            }
-        };
-
-        // Initialize
-        window.entries = [];
-        initializeFirebase();
-    </script>
-
-    <script>
-        // Convert local datetime input to Unix timestamp
-        function localDateTimeToTimestamp(localDateTimeString) {
-            // Parse the datetime-local value as a local time and get Unix timestamp
-            const date = new Date(localDateTimeString);
-            return date.getTime();
-        }
-
-        // Format a Unix timestamp to the viewer's local time
-        function formatTimestamp(timestamp) {
-            const date = new Date(timestamp);
-            return date.toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: 'numeric', 
-                minute: '2-digit',
-                hour12: true 
-            });
-        }
-
-        // Get the start of today in the viewer's local timezone (as Unix timestamp)
-        function getStartOfToday() {
-            const now = new Date();
-            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            return startOfDay.getTime();
-        }
-
-        // Get the end of today in the viewer's local timezone (as Unix timestamp)
-        function getEndOfToday() {
-            const now = new Date();
-            const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-            return endOfDay.getTime();
-        }
-
-        function setCurrentDateTime() {
-            const now = new Date();
-            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-            document.getElementById('datetime').value = now.toISOString().slice(0, 16);
-        }
-
-        function updateStats() {
-            const startOfToday = getStartOfToday();
-            const endOfToday = getEndOfToday();
-
-            // Filter entries that fall within today in the viewer's local timezone
-            const todayEntries = entries.filter(e => {
-                const entryTime = e.timestamp;
-                return entryTime >= startOfToday && entryTime <= endOfToday;
-            });
-
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric'
-            });
-
-            const fedEntries = todayEntries.filter(e => e.fed === 'Yes');
-            document.getElementById('totalFeedings').textContent = fedEntries.length;
-
-            const totalOz = fedEntries.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
-            document.getElementById('totalFormula').textContent = totalOz.toFixed(1);
-
-            const changedEntries = todayEntries.filter(e => e.changed === 'Yes');
-            document.getElementById('totalChanges').textContent = changedEntries.length;
-
-            // Calculate total sleep time for today
-            const sleepEntries = todayEntries.filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
-            let totalSleepMinutes = 0;
-            let lastAsleepTime = null;
-
-            sleepEntries.forEach(entry => {
-                if (entry.sleepStatus === 'Asleep') {
-                    lastAsleepTime = entry.timestamp;
-                } else if (entry.sleepStatus === 'Awake' && lastAsleepTime) {
-                    const sleepDuration = entry.timestamp - lastAsleepTime;
-                    totalSleepMinutes += sleepDuration / (1000 * 60);
-                    lastAsleepTime = null;
-                }
-            });
-
-            document.getElementById('totalSleep').textContent = (totalSleepMinutes / 60).toFixed(1);
-        }
-
-        function renderEntries() {
-            const tbody = document.getElementById('entriesBody');
-
-            if (entries.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="8" class="empty-state">
-                            <svg fill="currentColor" viewBox="0 0 20 20">
-                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
-                                <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
-                            </svg>
-                            <p>No entries yet. Add your first entry above!</p>
-                        </td>
-                    </tr>
-                `;
-                return;
-            }
-
-            // Sort entries by timestamp for sleep duration calculation
-            const sortedEntries = [...entries].sort((a, b) => b.timestamp - a.timestamp);
-
-            // Calculate sleep duration for each entry
-            const entriesWithDuration = sortedEntries.map((entry, idx) => {
-                let sleepDuration = null;
-
-                if (entry.sleepStatus === 'Awake') {
-                    // Find the most recent "Asleep" entry before this "Awake" entry
-                    for (let i = idx + 1; i < sortedEntries.length; i++) {
-                        if (sortedEntries[i].sleepStatus === 'Asleep') {
-                            const durationMs = entry.timestamp - sortedEntries[i].timestamp;
-                            const hours = Math.floor(durationMs / (1000 * 60 * 60));
-                            const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
-                            sleepDuration = `${hours}h ${minutes}m`;
-                            break;
-                        }
-                    }
-                }
-
-                return { ...entry, sleepDuration };
-            });
-
-            tbody.innerHTML = entriesWithDuration
-                .map((entry, index) => {
-                    // Use the timezone-safe timestamp for display
-                    const formattedDate = formatTimestamp(entry.timestamp);
-                    
-                    const fedBadge = entry.fed === 'Yes' 
-                        ? '<span class="badge badge-yes">Yes</span>' 
-                        : '<span class="badge badge-no">No</span>';
-                    
-                    const changedBadge = entry.changed === 'Yes' 
-                        ? '<span class="badge badge-yes">Yes</span>' 
-                        : '<span class="badge badge-no">No</span>';
-                    
-                    let stateBadge = '';
-                    if (entry.diaperState) {
-                        const stateClass = entry.diaperState.toLowerCase();
-                        stateBadge = `<span class="badge badge-${stateClass}">${entry.diaperState}</span>`;
-                    }
-
-                    let sleepBadge = '';
-                    if (entry.sleepStatus) {
-                        const sleepClass = entry.sleepStatus.toLowerCase();
-                        let displayText = entry.sleepStatus;
-                        if (entry.sleepStatus === 'Awake' && entry.sleepDuration) {
-                            displayText += ` (${entry.sleepDuration})`;
-                        }
-                        sleepBadge = `<span class="badge badge-${sleepClass}">${displayText}</span>`;
-                    }
-
-                    return `
-                        <tr>
-                            <td>${formattedDate}</td>
-                            <td>${fedBadge}</td>
-                            <td>${entry.amount || '--'}</td>
-                            <td>${changedBadge}</td>
-                            <td>${stateBadge}</td>
-                            <td>${sleepBadge}</td>
-                            <td>${entry.notes || '--'}</td>
-                            <td>
-                                <button class="edit-btn" onclick="editEntry('${entry.id || ''}', ${index})">Edit</button>
-                                <button class="delete-btn" onclick="deleteEntryById('${entry.id || ''}', ${index})">Delete</button>
-                            </td>
-                        </tr>
-                    `;
-                })
-                .join('');
-        }
-
-        function showToast(message) {
-            const toast = document.createElement('div');
-            toast.className = 'toast';
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            
-            setTimeout(() => {
-                toast.style.animation = 'slideInUp 0.4s ease-out reverse';
-                setTimeout(() => toast.remove(), 400);
-            }, 2000);
-        }
-
-        document.getElementById('babyForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-
-            const datetimeValue = document.getElementById('datetime').value;
-
-            const entry = {
-                // Store the Unix timestamp (timezone-independent)
-                timestamp: localDateTimeToTimestamp(datetimeValue),
-                // Keep the original datetime string for reference/debugging
-                datetimeLocal: datetimeValue,
-                fed: document.getElementById('fed').value,
-                amount: document.getElementById('amount').value,
-                changed: document.getElementById('changed').value,
-                diaperState: document.getElementById('diaperState').value,
-                sleepStatus: document.getElementById('sleepStatus').value,
-                notes: document.getElementById('notes').value
-            };
-
-            // Check if we're editing or adding
-            if (window.editingEntryId !== null || window.editingEntryIndex !== null) {
-                // Update existing entry
-                updateEntry(entry, window.editingEntryId, window.editingEntryIndex);
-                cancelEdit();
-            } else {
-                // Add new entry
-                addEntry(entry);
-            }
-
-            // Reset form
-            document.getElementById('babyForm').reset();
-            setCurrentDateTime();
-        });
-
-        function exportData() {
-            if (entries.length === 0) {
-                alert('No data to export!');
-                return;
-            }
-
-            const headers = ['Date/Time', 'Fed?', 'Amount (oz)', 'Changed?', 'Diaper State', 'Sleep Status', 'Notes'];
-            const csvContent = [
-                headers.join(','),
-                ...entries.map(e => [
-                    formatTimestamp(e.timestamp),
-                    e.fed,
-                    e.amount || '',
-                    e.changed,
-                    e.diaperState || '',
-                    e.sleepStatus || '',
-                    `"${e.notes || ''}"`
-                ].join(','))
-            ].join('\n');
-
-            const blob = new Blob([csvContent], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `baby-tracker-${new Date().toISOString().split('T')[0]}.csv`;
-            a.click();
-            window.URL.revokeObjectURL(url);
-            showToast('Data exported! 📊');
-        }
-
-        function clearAllData() {
-            if (confirm('Are you sure you want to clear ALL data? This cannot be undone!')) {
-                if (confirm('Really sure? This will delete everything!')) {
-                    entries = [];
-                    localStorage.removeItem('babyEntries');
-                    updateStats();
-                    renderEntries();
-                    showToast('All data cleared');
-                }
-            }
-        }
-
-        // Initialize
-        setCurrentDateTime();
-        updateStats();
-
-        // Update current date every minute
-        setInterval(() => {
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric' 
-            });
-        }, 60000);
-    </script>
 </body>
 </html>
