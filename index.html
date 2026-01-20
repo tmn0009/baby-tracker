@@ -803,14 +803,19 @@
             window.editingEntryIndex = index;
 
             // Convert timestamp back to datetime-local format
-            const date = new Date(entry.timestamp);
-            // Format as YYYY-MM-DDTHH:mm for datetime-local input
+            // Ensure timestamp is treated as milliseconds (Unix timestamp)
+            const timestamp = parseInt(entry.timestamp);
+            const date = new Date(timestamp);
+
+            // Get local date/time components directly without timezone manipulation
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
             const hours = String(date.getHours()).padStart(2, '0');
             const minutes = String(date.getMinutes()).padStart(2, '0');
-            document.getElementById('datetime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
+
+            const formattedDateTime = `${year}-${month}-${day}T${hours}:${minutes}`;
+            document.getElementById('datetime').value = formattedDateTime;
 
             // Populate form fields
             document.getElementById('fed').value = entry.fed;
@@ -900,8 +905,12 @@
 
         function setCurrentDateTime() {
             const now = new Date();
-            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-            document.getElementById('datetime').value = now.toISOString().slice(0, 16);
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('datetime').value = `${year}-${month}-${day}T${hours}:${minutes}`;
         }
 
         function updateStats() {
@@ -1086,7 +1095,7 @@
                 return;
             }
 
-            const headers = ['Date/Time', 'Fed?', 'Amount (oz)', 'Changed?', 'Diaper State', 'Notes'];
+            const headers = ['Date/Time', 'Fed?', 'Amount (oz)', 'Changed?', 'Diaper State', 'Sleep Status', 'Notes'];
             const csvContent = [
                 headers.join(','),
                 ...entries.map(e => [
@@ -1095,7 +1104,8 @@
                     e.amount || '',
                     e.changed,
                     e.diaperState || '',
-                    `"${e.notes || ''}"` 
+                    e.sleepStatus || '',
+                    `"${e.notes || ''}"`
                 ].join(','))
             ].join('\n');
 
