@@ -492,33 +492,6 @@
     </style>
 </head>
 <body>
-    <div id="authModal" class="setup-modal" style="display: none;">
-        <div class="setup-content">
-            <h2 id="authTitle">🔐 Sign In</h2>
-            <p style="margin-bottom: 20px; color: var(--text-muted);" id="authSubtitle">
-                Sign in to sync your baby tracker data across devices.
-            </p>
-
-            <label for="authEmail">Email:</label>
-            <input type="email" id="authEmail" placeholder="your@email.com" required>
-
-            <label for="authPassword">Password:</label>
-            <input type="password" id="authPassword" placeholder="••••••••" required>
-
-            <div id="authError" style="color: #FF6B6B; margin: 10px 0; display: none;"></div>
-
-            <div class="button-group">
-                <button class="btn btn-primary" id="signInBtn" onclick="handleSignIn()">Sign In</button>
-                <button class="btn btn-secondary" id="signUpBtn" onclick="handleSignUp()">Sign Up</button>
-                <button class="btn btn-secondary" onclick="useOfflineMode()">Use Offline</button>
-            </div>
-
-            <p style="margin-top: 15px; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
-                <a href="#" onclick="toggleAuthMode(); return false;" id="authToggleLink">Don't have an account? Sign up</a>
-            </p>
-        </div>
-    </div>
-
     <div id="setupModal" class="setup-modal" style="display: none;">
         <div class="setup-content">
             <h2>🔗 Connect to Live Sync</h2>
@@ -546,17 +519,13 @@
         </div>
     </div>
 
-    <div class="container" id="appContainer" style="display: none;">
+    <div class="container" id="appContainer">
         <header>
             <h1>🍼 Baby Tracker</h1>
             <p class="subtitle">Track feedings & diaper changes with love</p>
             <div class="sync-status">
                 <div class="sync-dot" id="syncDot"></div>
                 <span id="syncStatus">Checking connection...</span>
-            </div>
-            <div id="userInfo" style="margin-top: 10px; font-size: 0.9rem; color: var(--text-muted); display: none;">
-                Signed in as: <span id="userEmail" style="font-weight: 600;"></span>
-                <button class="btn btn-secondary" onclick="handleLogout()" style="margin-left: 10px; padding: 6px 12px; font-size: 0.85rem;">Logout</button>
             </div>
         </header>
 
@@ -687,13 +656,10 @@
         // Firebase will be initialized here
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getDatabase, ref, push, onValue, remove, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
-        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
         let db = null;
-        let auth = null;
         let entriesRef = null;
         let isConnected = false;
-        let currentUser = null;
 
         function updateSyncStatus(status, isOnline) {
             const dot = document.getElementById('syncDot');
@@ -711,8 +677,8 @@
             const config = JSON.parse(localStorage.getItem('firebaseConfig'));
 
             if (!config) {
-                updateSyncStatus('Not Connected', false);
-                document.getElementById('setupModal').style.display = 'flex';
+                updateSyncStatus('Offline Mode', false);
+                loadLocalData();
                 return;
             }
 
@@ -726,188 +692,40 @@
 
                 const app = initializeApp(firebaseConfig);
                 db = getDatabase(app);
-                auth = getAuth(app);
 
-                // Listen for auth state changes
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        currentUser = user;
-                        onUserAuthenticated(user);
+                // Set up data reference (shared for all users)
+                entriesRef = ref(db, 'entries');
+
+                // Listen for changes
+                onValue(entriesRef, (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        window.entries = Object.entries(data).map(([id, entry]) => ({
+                            ...entry,
+                            id: id
+                        }));
                     } else {
-                        currentUser = null;
-                        document.getElementById('appContainer').style.display = 'none';
-                        document.getElementById('authModal').style.display = 'flex';
+                        window.entries = [];
                     }
+                    updateStats();
+                    renderEntries();
                 });
+
+                isConnected = true;
+                updateSyncStatus('Live - Auto Syncing', true);
 
             } catch (error) {
                 console.error('Firebase init error:', error);
                 updateSyncStatus('Connection Error', false);
-                showAuthError('Failed to connect to Firebase. Check your configuration.');
+                loadLocalData();
             }
-        }
-
-        function onUserAuthenticated(user) {
-            // Set up user-specific data reference
-            entriesRef = ref(db, `users/${user.uid}/entries`);
-
-            // Listen for changes
-            onValue(entriesRef, (snapshot) => {
-                const data = snapshot.val();
-                if (data) {
-                    window.entries = Object.entries(data).map(([id, entry]) => ({
-                        ...entry,
-                        id: id
-                    }));
-                } else {
-                    window.entries = [];
-                }
-                updateStats();
-                renderEntries();
-            });
-
-            // Update UI
-            document.getElementById('authModal').style.display = 'none';
-            document.getElementById('appContainer').style.display = 'block';
-            document.getElementById('userEmail').textContent = user.email;
-            document.getElementById('userInfo').style.display = 'block';
-
-            isConnected = true;
-            updateSyncStatus('Live - Auto Syncing', true);
         }
 
         function loadLocalData() {
             window.entries = JSON.parse(localStorage.getItem('babyEntries')) || [];
             updateStats();
             renderEntries();
-            document.getElementById('appContainer').style.display = 'block';
         }
-
-        function showAuthError(message) {
-            const errorDiv = document.getElementById('authError');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-            setTimeout(() => {
-                errorDiv.style.display = 'none';
-            }, 5000);
-        }
-
-        window.handleSignIn = async function() {
-            const email = document.getElementById('authEmail').value;
-            const password = document.getElementById('authPassword').value;
-
-            if (!email || !password) {
-                showAuthError('Please enter both email and password');
-                return;
-            }
-
-            if (!auth) {
-                showAuthError('Firebase not configured. Click Sync Settings first.');
-                return;
-            }
-
-            try {
-                await signInWithEmailAndPassword(auth, email, password);
-                showToast('Signed in successfully! 🎉');
-            } catch (error) {
-                console.error('Sign in error:', error);
-                let message = 'Failed to sign in. ';
-                if (error.code === 'auth/user-not-found') {
-                    message += 'Account not found. Please sign up first.';
-                } else if (error.code === 'auth/wrong-password') {
-                    message += 'Incorrect password.';
-                } else if (error.code === 'auth/invalid-email') {
-                    message += 'Invalid email address.';
-                } else if (error.code === 'auth/invalid-credential') {
-                    message += 'Invalid credentials. Check your email and password.';
-                } else {
-                    message += error.message;
-                }
-                showAuthError(message);
-            }
-        };
-
-        window.handleSignUp = async function() {
-            const email = document.getElementById('authEmail').value;
-            const password = document.getElementById('authPassword').value;
-
-            if (!email || !password) {
-                showAuthError('Please enter both email and password');
-                return;
-            }
-
-            if (password.length < 6) {
-                showAuthError('Password must be at least 6 characters');
-                return;
-            }
-
-            if (!auth) {
-                showAuthError('Firebase not configured. Click Sync Settings first.');
-                return;
-            }
-
-            try {
-                await createUserWithEmailAndPassword(auth, email, password);
-                showToast('Account created successfully! 🎉');
-            } catch (error) {
-                console.error('Sign up error:', error);
-                let message = 'Failed to create account. ';
-                if (error.code === 'auth/email-already-in-use') {
-                    message += 'This email is already registered. Try signing in instead.';
-                } else if (error.code === 'auth/invalid-email') {
-                    message += 'Invalid email address.';
-                } else if (error.code === 'auth/weak-password') {
-                    message += 'Password is too weak. Use at least 6 characters.';
-                } else {
-                    message += error.message;
-                }
-                showAuthError(message);
-            }
-        };
-
-        window.handleLogout = async function() {
-            if (!confirm('Are you sure you want to logout?')) return;
-
-            try {
-                await signOut(auth);
-                showToast('Logged out successfully');
-                document.getElementById('authEmail').value = '';
-                document.getElementById('authPassword').value = '';
-            } catch (error) {
-                console.error('Logout error:', error);
-                showToast('Error logging out');
-            }
-        };
-
-        window.useOfflineMode = function() {
-            document.getElementById('authModal').style.display = 'none';
-            loadLocalData();
-            updateSyncStatus('Offline Mode', false);
-        };
-
-        window.toggleAuthMode = function() {
-            const title = document.getElementById('authTitle');
-            const subtitle = document.getElementById('authSubtitle');
-            const toggleLink = document.getElementById('authToggleLink');
-            const signInBtn = document.getElementById('signInBtn');
-            const signUpBtn = document.getElementById('signUpBtn');
-
-            if (title.textContent.includes('Sign In')) {
-                title.textContent = '🔐 Sign Up';
-                subtitle.textContent = 'Create a new account to start syncing your data.';
-                toggleLink.textContent = 'Already have an account? Sign in';
-                signInBtn.style.display = 'none';
-                signUpBtn.style.display = 'inline-block';
-            } else {
-                title.textContent = '🔐 Sign In';
-                subtitle.textContent = 'Sign in to sync your baby tracker data across devices.';
-                toggleLink.textContent = "Don't have an account? Sign up";
-                signInBtn.style.display = 'inline-block';
-                signUpBtn.style.display = 'none';
-            }
-
-            document.getElementById('authError').style.display = 'none';
-        };
 
         window.saveFirebaseConfig = function() {
             const config = {
@@ -971,7 +789,7 @@
                 localStorage.setItem('babyEntries', JSON.stringify(window.entries));
                 updateStats();
                 renderEntries();
-                showToast('Entry deleted (offline)');
+                showToast('Entry deleted');
             }
         };
 
