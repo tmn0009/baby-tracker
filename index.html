@@ -496,30 +496,30 @@
         <div class="setup-content">
             <h2>🔗 Connect to Live Sync</h2>
             <p style="margin-bottom: 20px; color: var(--text-muted);">
-                Enter your Firebase connection code to enable real-time syncing between devices.
+                Enter your Firebase connection code to enable real-time syncing between devices. 
                 Get this from the setup instructions.
             </p>
-
+            
             <label for="firebaseKey">Firebase API Key:</label>
             <input type="text" id="firebaseKey" placeholder="AIza...">
-
+            
             <label for="firebaseDomain">Auth Domain:</label>
             <input type="text" id="firebaseDomain" placeholder="your-app.firebaseapp.com">
-
+            
             <label for="firebaseUrl">Database URL:</label>
             <input type="text" id="firebaseUrl" placeholder="https://your-app.firebaseio.com">
-
+            
             <label for="firebaseProject">Project ID:</label>
             <input type="text" id="firebaseProject" placeholder="your-app">
-
+            
             <div class="button-group">
                 <button class="btn btn-primary" onclick="saveFirebaseConfig()">Connect</button>
-                <button class="btn btn-secondary" onclick="closeSetup()">Cancel</button>
+                <button class="btn btn-secondary" onclick="closeSetup()">Skip (Use Offline)</button>
             </div>
         </div>
     </div>
 
-    <div class="container" id="appContainer">
+    <div class="container">
         <header>
             <h1>🍼 Baby Tracker</h1>
             <p class="subtitle">Track feedings & diaper changes with love</p>
@@ -675,9 +675,10 @@
 
         function initializeFirebase() {
             const config = JSON.parse(localStorage.getItem('firebaseConfig'));
-
+            
             if (!config) {
-                updateSyncStatus('Offline Mode', false);
+                updateSyncStatus('Offline Mode - Click Sync Settings', false);
+                document.getElementById('setupModal').style.display = 'flex';
                 loadLocalData();
                 return;
             }
@@ -692,10 +693,8 @@
 
                 const app = initializeApp(firebaseConfig);
                 db = getDatabase(app);
-
-                // Set up data reference (shared for all users)
                 entriesRef = ref(db, 'entries');
-
+                
                 // Listen for changes
                 onValue(entriesRef, (snapshot) => {
                     const data = snapshot.val();
@@ -713,10 +712,9 @@
 
                 isConnected = true;
                 updateSyncStatus('Live - Auto Syncing', true);
-
             } catch (error) {
                 console.error('Firebase init error:', error);
-                updateSyncStatus('Connection Error', false);
+                updateSyncStatus('Connection Error - Using Offline', false);
                 loadLocalData();
             }
         }
@@ -789,7 +787,7 @@
                 localStorage.setItem('babyEntries', JSON.stringify(window.entries));
                 updateStats();
                 renderEntries();
-                showToast('Entry deleted');
+                showToast('Entry deleted (offline)');
             }
         };
 
@@ -988,15 +986,15 @@
                 .map((entry, index) => {
                     // Use the timezone-safe timestamp for display
                     const formattedDate = formatTimestamp(entry.timestamp);
-
-                    const fedBadge = entry.fed === 'Yes'
-                        ? '<span class="badge badge-yes">Yes</span>'
+                    
+                    const fedBadge = entry.fed === 'Yes' 
+                        ? '<span class="badge badge-yes">Yes</span>' 
                         : '<span class="badge badge-no">No</span>';
-
-                    const changedBadge = entry.changed === 'Yes'
-                        ? '<span class="badge badge-yes">Yes</span>'
+                    
+                    const changedBadge = entry.changed === 'Yes' 
+                        ? '<span class="badge badge-yes">Yes</span>' 
                         : '<span class="badge badge-no">No</span>';
-
+                    
                     let stateBadge = '';
                     if (entry.diaperState) {
                         const stateClass = entry.diaperState.toLowerCase();
