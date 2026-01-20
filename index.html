@@ -794,13 +794,28 @@
         window.editingEntryId = null;
         window.editingEntryIndex = null;
 
-        window.editEntry = function(id, index) {
-            const entry = window.entries[index];
-            if (!entry) return;
+        window.editEntry = function(id, displayIndex) {
+            // Find the actual entry in window.entries by id or by matching timestamp
+            let entry = null;
+            let actualIndex = -1;
+
+            if (id) {
+                // Find by ID (for Firebase entries)
+                actualIndex = window.entries.findIndex(e => e.id === id);
+                entry = window.entries[actualIndex];
+            } else {
+                // For local storage entries without ID, use displayIndex
+                // But we need to map from sorted display order to actual entries array
+                const sortedEntries = [...window.entries].sort((a, b) => b.timestamp - a.timestamp);
+                entry = sortedEntries[displayIndex];
+                actualIndex = window.entries.findIndex(e => e.timestamp === entry.timestamp);
+            }
+
+            if (!entry || actualIndex === -1) return;
 
             // Store which entry we're editing
             window.editingEntryId = id;
-            window.editingEntryIndex = index;
+            window.editingEntryIndex = actualIndex;
 
             // Convert timestamp back to datetime-local format
             // Ensure timestamp is treated as milliseconds (Unix timestamp)
