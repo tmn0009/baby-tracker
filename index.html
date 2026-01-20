@@ -657,6 +657,11 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getDatabase, ref, push, onValue, remove, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
 
+        // Make these accessible globally for the second script block
+        window.db = null;
+        window.entriesRef = null;
+        window.isConnected = false;
+
         let db = null;
         let entriesRef = null;
         let isConnected = false;
@@ -674,12 +679,14 @@
         }
 
         function initializeFirebase() {
+            // Load local data first to ensure entries array is populated
+            loadLocalData();
+
             const config = JSON.parse(localStorage.getItem('firebaseConfig'));
-            
+
             if (!config) {
                 updateSyncStatus('Offline Mode - Click Sync Settings', false);
                 document.getElementById('setupModal').style.display = 'flex';
-                loadLocalData();
                 return;
             }
 
@@ -694,7 +701,10 @@
                 const app = initializeApp(firebaseConfig);
                 db = getDatabase(app);
                 entriesRef = ref(db, 'entries');
-                
+                // Update global references
+                window.db = db;
+                window.entriesRef = entriesRef;
+
                 // Listen for changes
                 onValue(entriesRef, (snapshot) => {
                     const data = snapshot.val();
@@ -706,16 +716,19 @@
                     } else {
                         window.entries = [];
                     }
+                    // Sync to localStorage for offline fallback
+                    localStorage.setItem('babyEntries', JSON.stringify(window.entries));
                     updateStats();
                     renderEntries();
                 });
 
                 isConnected = true;
+                window.isConnected = true;
                 updateSyncStatus('Live - Auto Syncing', true);
             } catch (error) {
                 console.error('Firebase init error:', error);
                 updateSyncStatus('Connection Error - Using Offline', false);
-                loadLocalData();
+                // Data already loaded from loadLocalData() call above
             }
         }
 
@@ -764,7 +777,8 @@
                 await push(entriesRef, entry);
                 showToast('Entry added and synced! 🎉');
             } else {
-                // Add to localStorage
+                // Add to localStorage with generated ID
+                entry.id = 'offline_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                 window.entries.push(entry);
                 localStorage.setItem('babyEntries', JSON.stringify(window.entries));
                 updateStats();
@@ -859,12 +873,14 @@
 
         window.updateEntry = async function(entry, id, index) {
             if (isConnected && db && id) {
-                // Update in Firebase
+                // Update in Firebase - preserve the ID
+                entry.id = id;
                 const entryRef = ref(db, `entries/${id}`);
                 await set(entryRef, entry);
                 showToast('Entry updated and synced! ✨');
             } else {
-                // Update in localStorage
+                // Update in localStorage - preserve the ID
+                entry.id = id || window.entries[index].id;
                 window.entries[index] = entry;
                 localStorage.setItem('babyEntries', JSON.stringify(window.entries));
                 updateStats();
@@ -881,8 +897,14 @@
     <script>
         // Convert local datetime input to Unix timestamp
         function localDateTimeToTimestamp(localDateTimeString) {
-            // Parse the datetime-local value as a local time and get Unix timestamp
-            const date = new Date(localDateTimeString);
+            // Parse the datetime-local value explicitly as local time
+            // Format: YYYY-MM-DDTHH:MM
+            const [datePart, timePart] = localDateTimeString.split('T');
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hours, minutes] = timePart.split(':').map(Number);
+
+            // Create date in local timezone
+            const date = new Date(year, month - 1, day, hours, minutes);
             return date.getTime();
         }
 
@@ -927,7 +949,7 @@
             const endOfToday = getEndOfToday();
 
             // Filter entries that fall within today in the viewer's local timezone
-            const todayEntries = entries.filter(e => {
+            const todayEntries = window.entries.filter(e => {
                 const entryTime = e.timestamp;
                 return entryTime >= startOfToday && entryTime <= endOfToday;
             });
@@ -947,16 +969,22 @@
             document.getElementById('totalChanges').textContent = changedEntries.length;
 
             // Calculate total sleep time for today
-            const sleepEntries = todayEntries.filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
+            // Include sleep that started before today but ended today
+            const allSleepEntries = window.entries.filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
             let totalSleepMinutes = 0;
             let lastAsleepTime = null;
 
-            sleepEntries.forEach(entry => {
+            allSleepEntries.forEach(entry => {
                 if (entry.sleepStatus === 'Asleep') {
                     lastAsleepTime = entry.timestamp;
                 } else if (entry.sleepStatus === 'Awake' && lastAsleepTime) {
-                    const sleepDuration = entry.timestamp - lastAsleepTime;
-                    totalSleepMinutes += sleepDuration / (1000 * 60);
+                    // Only count if the wake-up time is today
+                    if (entry.timestamp >= startOfToday && entry.timestamp <= endOfToday) {
+                        // If fell asleep before today, only count time from start of today
+                        const effectiveStart = Math.max(lastAsleepTime, startOfToday);
+                        const sleepDuration = entry.timestamp - effectiveStart;
+                        totalSleepMinutes += sleepDuration / (1000 * 60);
+                    }
                     lastAsleepTime = null;
                 }
             });
@@ -967,7 +995,7 @@
         function renderEntries() {
             const tbody = document.getElementById('entriesBody');
 
-            if (entries.length === 0) {
+            if (window.entries.length === 0) {
                 tbody.innerHTML = `
                     <tr>
                         <td colspan="8" class="empty-state">
@@ -982,28 +1010,30 @@
                 return;
             }
 
-            // Sort entries by timestamp for sleep duration calculation
-            const sortedEntries = [...entries].sort((a, b) => b.timestamp - a.timestamp);
+            // Sort entries by timestamp (newest first for display)
+            const sortedEntries = [...window.entries].sort((a, b) => b.timestamp - a.timestamp);
 
-            // Calculate sleep duration for each entry
-            const entriesWithDuration = sortedEntries.map((entry, idx) => {
-                let sleepDuration = null;
+            // Calculate sleep duration for each entry using consistent logic
+            const allSleepEntries = [...window.entries].filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
+            const sleepDurationMap = new Map();
 
-                if (entry.sleepStatus === 'Awake') {
-                    // Find the most recent "Asleep" entry before this "Awake" entry
-                    for (let i = idx + 1; i < sortedEntries.length; i++) {
-                        if (sortedEntries[i].sleepStatus === 'Asleep') {
-                            const durationMs = entry.timestamp - sortedEntries[i].timestamp;
-                            const hours = Math.floor(durationMs / (1000 * 60 * 60));
-                            const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
-                            sleepDuration = `${hours}h ${minutes}m`;
-                            break;
-                        }
-                    }
+            let lastAsleepEntry = null;
+            allSleepEntries.forEach(entry => {
+                if (entry.sleepStatus === 'Asleep') {
+                    lastAsleepEntry = entry;
+                } else if (entry.sleepStatus === 'Awake' && lastAsleepEntry) {
+                    const durationMs = entry.timestamp - lastAsleepEntry.timestamp;
+                    const hours = Math.floor(durationMs / (1000 * 60 * 60));
+                    const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+                    sleepDurationMap.set(entry.timestamp, `${hours}h ${minutes}m`);
+                    lastAsleepEntry = null;
                 }
-
-                return { ...entry, sleepDuration };
             });
+
+            const entriesWithDuration = sortedEntries.map(entry => ({
+                ...entry,
+                sleepDuration: sleepDurationMap.get(entry.timestamp) || null
+            }));
 
             tbody.innerHTML = entriesWithDuration
                 .map((entry, index) => {
@@ -1069,14 +1099,30 @@
             e.preventDefault();
 
             const datetimeValue = document.getElementById('datetime').value;
+            const fedValue = document.getElementById('fed').value;
+            const amountValue = document.getElementById('amount').value;
+
+            // Validate amount field
+            if (fedValue === 'Yes' && amountValue) {
+                const amount = parseFloat(amountValue);
+                if (isNaN(amount) || amount < 0) {
+                    alert('Please enter a valid positive number for the amount.');
+                    return;
+                }
+                if (amount > 50) {
+                    if (!confirm('The amount seems unusually high (over 50 oz). Continue anyway?')) {
+                        return;
+                    }
+                }
+            }
 
             const entry = {
                 // Store the Unix timestamp (timezone-independent)
                 timestamp: localDateTimeToTimestamp(datetimeValue),
                 // Keep the original datetime string for reference/debugging
                 datetimeLocal: datetimeValue,
-                fed: document.getElementById('fed').value,
-                amount: document.getElementById('amount').value,
+                fed: fedValue,
+                amount: amountValue,
                 changed: document.getElementById('changed').value,
                 diaperState: document.getElementById('diaperState').value,
                 sleepStatus: document.getElementById('sleepStatus').value,
@@ -1099,22 +1145,25 @@
         });
 
         function exportData() {
-            if (entries.length === 0) {
+            if (window.entries.length === 0) {
                 alert('No data to export!');
                 return;
             }
 
+            // Sort entries by timestamp (oldest to newest) for export
+            const sortedEntries = [...window.entries].sort((a, b) => a.timestamp - b.timestamp);
+
             const headers = ['Date/Time', 'Fed?', 'Amount (oz)', 'Changed?', 'Diaper State', 'Sleep Status', 'Notes'];
             const csvContent = [
                 headers.join(','),
-                ...entries.map(e => [
+                ...sortedEntries.map(e => [
                     formatTimestamp(e.timestamp),
                     e.fed,
                     e.amount || '',
                     e.changed,
                     e.diaperState || '',
                     e.sleepStatus || '',
-                    `"${e.notes || ''}"`
+                    `"${(e.notes || '').replace(/"/g, '""')}"`
                 ].join(','))
             ].join('\n');
 
@@ -1128,14 +1177,27 @@
             showToast('Data exported! 📊');
         }
 
-        function clearAllData() {
+        async function clearAllData() {
             if (confirm('Are you sure you want to clear ALL data? This cannot be undone!')) {
                 if (confirm('Really sure? This will delete everything!')) {
-                    entries = [];
-                    localStorage.removeItem('babyEntries');
-                    updateStats();
-                    renderEntries();
-                    showToast('All data cleared');
+                    if (window.isConnected && window.db && window.entriesRef) {
+                        // Clear Firebase data
+                        try {
+                            const { set } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js');
+                            await set(window.entriesRef, null);
+                            showToast('All data cleared and synced');
+                        } catch (error) {
+                            console.error('Error clearing Firebase data:', error);
+                            showToast('Error clearing online data');
+                        }
+                    } else {
+                        // Clear localStorage only
+                        window.entries = [];
+                        localStorage.removeItem('babyEntries');
+                        updateStats();
+                        renderEntries();
+                        showToast('All data cleared');
+                    }
                 }
             }
         }
