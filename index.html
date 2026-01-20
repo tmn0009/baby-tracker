@@ -969,10 +969,11 @@
             document.getElementById('totalChanges').textContent = changedEntries.length;
 
             // Calculate total sleep time for today
-            // Include sleep that started before today but ended today
+            // Include sleep that started before today but ended today, and ongoing sleep
             const allSleepEntries = window.entries.filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
             let totalSleepMinutes = 0;
             let lastAsleepTime = null;
+            const now = Date.now();
 
             allSleepEntries.forEach(entry => {
                 if (entry.sleepStatus === 'Asleep') {
@@ -988,6 +989,20 @@
                     lastAsleepTime = null;
                 }
             });
+
+            // Handle ongoing sleep (baby is currently asleep)
+            if (lastAsleepTime !== null) {
+                // Baby fell asleep but hasn't woken up yet
+                // Calculate sleep time up to now (or end of today if we're past midnight)
+                const effectiveEnd = Math.min(now, endOfToday);
+
+                // Only count if some part of the sleep is today
+                if (effectiveEnd >= startOfToday) {
+                    const effectiveStart = Math.max(lastAsleepTime, startOfToday);
+                    const sleepDuration = effectiveEnd - effectiveStart;
+                    totalSleepMinutes += sleepDuration / (1000 * 60);
+                }
+            }
 
             document.getElementById('totalSleep').textContent = (totalSleepMinutes / 60).toFixed(1);
         }
@@ -1016,6 +1031,8 @@
             // Calculate sleep duration for each entry using consistent logic
             const allSleepEntries = [...window.entries].filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
             const sleepDurationMap = new Map();
+            const ongoingSleepMap = new Map();
+            const now = Date.now();
 
             let lastAsleepEntry = null;
             allSleepEntries.forEach(entry => {
@@ -1030,9 +1047,17 @@
                 }
             });
 
+            // Mark ongoing sleep (currently asleep)
+            if (lastAsleepEntry !== null) {
+                const durationMs = now - lastAsleepEntry.timestamp;
+                const hours = Math.floor(durationMs / (1000 * 60 * 60));
+                const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+                ongoingSleepMap.set(lastAsleepEntry.timestamp, `${hours}h ${minutes}m (ongoing)`);
+            }
+
             const entriesWithDuration = sortedEntries.map(entry => ({
                 ...entry,
-                sleepDuration: sleepDurationMap.get(entry.timestamp) || null
+                sleepDuration: sleepDurationMap.get(entry.timestamp) || ongoingSleepMap.get(entry.timestamp) || null
             }));
 
             tbody.innerHTML = entriesWithDuration
@@ -1058,7 +1083,8 @@
                     if (entry.sleepStatus) {
                         const sleepClass = entry.sleepStatus.toLowerCase();
                         let displayText = entry.sleepStatus;
-                        if (entry.sleepStatus === 'Awake' && entry.sleepDuration) {
+                        // Show duration for both Awake (completed sleep) and Asleep (ongoing sleep)
+                        if (entry.sleepDuration) {
                             displayText += ` (${entry.sleepDuration})`;
                         }
                         sleepBadge = `<span class="badge badge-${sleepClass}">${displayText}</span>`;
@@ -1206,12 +1232,15 @@
         setCurrentDateTime();
         updateStats();
 
-        // Update current date every minute
+        // Update stats and entries every minute to show ongoing sleep time
         setInterval(() => {
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric' 
+            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric'
             });
+            // Refresh sleep calculations to update ongoing sleep duration
+            updateStats();
+            renderEntries();
         }, 60000);
     </script>
 </body>
