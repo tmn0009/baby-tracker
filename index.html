@@ -102,7 +102,7 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 15px;
             margin-bottom: 30px;
         }
@@ -362,6 +362,16 @@
             color: #512DA8;
         }
 
+        .badge-asleep {
+            background: #B39DDB;
+            color: #4527A0;
+        }
+
+        .badge-awake {
+            background: #FFE082;
+            color: #F57F17;
+        }
+
         .empty-state {
             text-align: center;
             padding: 40px;
@@ -482,40 +492,71 @@
     </style>
 </head>
 <body>
+    <div id="authModal" class="setup-modal" style="display: none;">
+        <div class="setup-content">
+            <h2 id="authTitle">🔐 Sign In</h2>
+            <p style="margin-bottom: 20px; color: var(--text-muted);" id="authSubtitle">
+                Sign in to sync your baby tracker data across devices.
+            </p>
+
+            <label for="authEmail">Email:</label>
+            <input type="email" id="authEmail" placeholder="your@email.com" required>
+
+            <label for="authPassword">Password:</label>
+            <input type="password" id="authPassword" placeholder="••••••••" required>
+
+            <div id="authError" style="color: #FF6B6B; margin: 10px 0; display: none;"></div>
+
+            <div class="button-group">
+                <button class="btn btn-primary" id="signInBtn" onclick="handleSignIn()">Sign In</button>
+                <button class="btn btn-secondary" id="signUpBtn" onclick="handleSignUp()">Sign Up</button>
+                <button class="btn btn-secondary" onclick="useOfflineMode()">Use Offline</button>
+            </div>
+
+            <p style="margin-top: 15px; font-size: 0.85rem; color: var(--text-muted); text-align: center;">
+                <a href="#" onclick="toggleAuthMode(); return false;" id="authToggleLink">Don't have an account? Sign up</a>
+            </p>
+        </div>
+    </div>
+
     <div id="setupModal" class="setup-modal" style="display: none;">
         <div class="setup-content">
             <h2>🔗 Connect to Live Sync</h2>
             <p style="margin-bottom: 20px; color: var(--text-muted);">
-                Enter your Firebase connection code to enable real-time syncing between devices. 
+                Enter your Firebase connection code to enable real-time syncing between devices.
                 Get this from the setup instructions.
             </p>
-            
+
             <label for="firebaseKey">Firebase API Key:</label>
             <input type="text" id="firebaseKey" placeholder="AIza...">
-            
+
             <label for="firebaseDomain">Auth Domain:</label>
             <input type="text" id="firebaseDomain" placeholder="your-app.firebaseapp.com">
-            
+
             <label for="firebaseUrl">Database URL:</label>
             <input type="text" id="firebaseUrl" placeholder="https://your-app.firebaseio.com">
-            
+
             <label for="firebaseProject">Project ID:</label>
             <input type="text" id="firebaseProject" placeholder="your-app">
-            
+
             <div class="button-group">
                 <button class="btn btn-primary" onclick="saveFirebaseConfig()">Connect</button>
-                <button class="btn btn-secondary" onclick="closeSetup()">Skip (Use Offline)</button>
+                <button class="btn btn-secondary" onclick="closeSetup()">Cancel</button>
             </div>
         </div>
     </div>
 
-    <div class="container">
+    <div class="container" id="appContainer" style="display: none;">
         <header>
             <h1>🍼 Baby Tracker</h1>
             <p class="subtitle">Track feedings & diaper changes with love</p>
             <div class="sync-status">
                 <div class="sync-dot" id="syncDot"></div>
                 <span id="syncStatus">Checking connection...</span>
+            </div>
+            <div id="userInfo" style="margin-top: 10px; font-size: 0.9rem; color: var(--text-muted); display: none;">
+                Signed in as: <span id="userEmail" style="font-weight: 600;"></span>
+                <button class="btn btn-secondary" onclick="handleLogout()" style="margin-left: 10px; padding: 6px 12px; font-size: 0.85rem;">Logout</button>
             </div>
         </header>
 
@@ -535,6 +576,10 @@
             <div class="stat-card">
                 <div class="stat-label">Diaper Changes</div>
                 <div class="stat-value" id="totalChanges">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Total Sleep (hrs)</div>
+                <div class="stat-value" id="totalSleep">0</div>
             </div>
         </div>
 
@@ -573,6 +618,14 @@
                             <option value="Both">Both</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label for="sleepStatus">Sleep Status</label>
+                        <select id="sleepStatus">
+                            <option value="">--</option>
+                            <option value="Asleep">Fell Asleep</option>
+                            <option value="Awake">Woke Up</option>
+                        </select>
+                    </div>
                     <div class="form-group note-input">
                         <label for="notes">Notes</label>
                         <input type="text" id="notes" placeholder="Any observations...">
@@ -599,13 +652,14 @@
                             <th>Amount</th>
                             <th>Changed?</th>
                             <th>State</th>
+                            <th>Sleep</th>
                             <th>Notes</th>
                             <th></th>
                         </tr>
                     </thead>
                     <tbody id="entriesBody">
                         <tr>
-                            <td colspan="7" class="empty-state">
+                            <td colspan="8" class="empty-state">
                                 <svg fill="currentColor" viewBox="0 0 20 20">
                                     <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
                                     <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
@@ -633,10 +687,13 @@
         // Firebase will be initialized here
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getDatabase, ref, push, onValue, remove, set } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
 
         let db = null;
+        let auth = null;
         let entriesRef = null;
         let isConnected = false;
+        let currentUser = null;
 
         function updateSyncStatus(status, isOnline) {
             const dot = document.getElementById('syncDot');
@@ -652,11 +709,10 @@
 
         function initializeFirebase() {
             const config = JSON.parse(localStorage.getItem('firebaseConfig'));
-            
+
             if (!config) {
-                updateSyncStatus('Offline Mode - Click Sync Settings', false);
+                updateSyncStatus('Not Connected', false);
                 document.getElementById('setupModal').style.display = 'flex';
-                loadLocalData();
                 return;
             }
 
@@ -670,37 +726,188 @@
 
                 const app = initializeApp(firebaseConfig);
                 db = getDatabase(app);
-                entriesRef = ref(db, 'entries');
-                
-                // Listen for changes
-                onValue(entriesRef, (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        window.entries = Object.entries(data).map(([id, entry]) => ({
-                            ...entry,
-                            id: id
-                        }));
+                auth = getAuth(app);
+
+                // Listen for auth state changes
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        onUserAuthenticated(user);
                     } else {
-                        window.entries = [];
+                        currentUser = null;
+                        document.getElementById('appContainer').style.display = 'none';
+                        document.getElementById('authModal').style.display = 'flex';
                     }
-                    updateStats();
-                    renderEntries();
                 });
 
-                isConnected = true;
-                updateSyncStatus('Live - Auto Syncing', true);
             } catch (error) {
                 console.error('Firebase init error:', error);
-                updateSyncStatus('Connection Error - Using Offline', false);
-                loadLocalData();
+                updateSyncStatus('Connection Error', false);
+                showAuthError('Failed to connect to Firebase. Check your configuration.');
             }
+        }
+
+        function onUserAuthenticated(user) {
+            // Set up user-specific data reference
+            entriesRef = ref(db, `users/${user.uid}/entries`);
+
+            // Listen for changes
+            onValue(entriesRef, (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    window.entries = Object.entries(data).map(([id, entry]) => ({
+                        ...entry,
+                        id: id
+                    }));
+                } else {
+                    window.entries = [];
+                }
+                updateStats();
+                renderEntries();
+            });
+
+            // Update UI
+            document.getElementById('authModal').style.display = 'none';
+            document.getElementById('appContainer').style.display = 'block';
+            document.getElementById('userEmail').textContent = user.email;
+            document.getElementById('userInfo').style.display = 'block';
+
+            isConnected = true;
+            updateSyncStatus('Live - Auto Syncing', true);
         }
 
         function loadLocalData() {
             window.entries = JSON.parse(localStorage.getItem('babyEntries')) || [];
             updateStats();
             renderEntries();
+            document.getElementById('appContainer').style.display = 'block';
         }
+
+        function showAuthError(message) {
+            const errorDiv = document.getElementById('authError');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        window.handleSignIn = async function() {
+            const email = document.getElementById('authEmail').value;
+            const password = document.getElementById('authPassword').value;
+
+            if (!email || !password) {
+                showAuthError('Please enter both email and password');
+                return;
+            }
+
+            if (!auth) {
+                showAuthError('Firebase not configured. Click Sync Settings first.');
+                return;
+            }
+
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                showToast('Signed in successfully! 🎉');
+            } catch (error) {
+                console.error('Sign in error:', error);
+                let message = 'Failed to sign in. ';
+                if (error.code === 'auth/user-not-found') {
+                    message += 'Account not found. Please sign up first.';
+                } else if (error.code === 'auth/wrong-password') {
+                    message += 'Incorrect password.';
+                } else if (error.code === 'auth/invalid-email') {
+                    message += 'Invalid email address.';
+                } else if (error.code === 'auth/invalid-credential') {
+                    message += 'Invalid credentials. Check your email and password.';
+                } else {
+                    message += error.message;
+                }
+                showAuthError(message);
+            }
+        };
+
+        window.handleSignUp = async function() {
+            const email = document.getElementById('authEmail').value;
+            const password = document.getElementById('authPassword').value;
+
+            if (!email || !password) {
+                showAuthError('Please enter both email and password');
+                return;
+            }
+
+            if (password.length < 6) {
+                showAuthError('Password must be at least 6 characters');
+                return;
+            }
+
+            if (!auth) {
+                showAuthError('Firebase not configured. Click Sync Settings first.');
+                return;
+            }
+
+            try {
+                await createUserWithEmailAndPassword(auth, email, password);
+                showToast('Account created successfully! 🎉');
+            } catch (error) {
+                console.error('Sign up error:', error);
+                let message = 'Failed to create account. ';
+                if (error.code === 'auth/email-already-in-use') {
+                    message += 'This email is already registered. Try signing in instead.';
+                } else if (error.code === 'auth/invalid-email') {
+                    message += 'Invalid email address.';
+                } else if (error.code === 'auth/weak-password') {
+                    message += 'Password is too weak. Use at least 6 characters.';
+                } else {
+                    message += error.message;
+                }
+                showAuthError(message);
+            }
+        };
+
+        window.handleLogout = async function() {
+            if (!confirm('Are you sure you want to logout?')) return;
+
+            try {
+                await signOut(auth);
+                showToast('Logged out successfully');
+                document.getElementById('authEmail').value = '';
+                document.getElementById('authPassword').value = '';
+            } catch (error) {
+                console.error('Logout error:', error);
+                showToast('Error logging out');
+            }
+        };
+
+        window.useOfflineMode = function() {
+            document.getElementById('authModal').style.display = 'none';
+            loadLocalData();
+            updateSyncStatus('Offline Mode', false);
+        };
+
+        window.toggleAuthMode = function() {
+            const title = document.getElementById('authTitle');
+            const subtitle = document.getElementById('authSubtitle');
+            const toggleLink = document.getElementById('authToggleLink');
+            const signInBtn = document.getElementById('signInBtn');
+            const signUpBtn = document.getElementById('signUpBtn');
+
+            if (title.textContent.includes('Sign In')) {
+                title.textContent = '🔐 Sign Up';
+                subtitle.textContent = 'Create a new account to start syncing your data.';
+                toggleLink.textContent = 'Already have an account? Sign in';
+                signInBtn.style.display = 'none';
+                signUpBtn.style.display = 'inline-block';
+            } else {
+                title.textContent = '🔐 Sign In';
+                subtitle.textContent = 'Sign in to sync your baby tracker data across devices.';
+                toggleLink.textContent = "Don't have an account? Sign up";
+                signInBtn.style.display = 'inline-block';
+                signUpBtn.style.display = 'none';
+            }
+
+            document.getElementById('authError').style.display = 'none';
+        };
 
         window.saveFirebaseConfig = function() {
             const config = {
@@ -789,6 +996,7 @@
             document.getElementById('amount').value = entry.amount || '';
             document.getElementById('changed').value = entry.changed;
             document.getElementById('diaperState').value = entry.diaperState || '';
+            document.getElementById('sleepStatus').value = entry.sleepStatus || '';
             document.getElementById('notes').value = entry.notes || '';
 
             // Update UI to show we're editing
@@ -878,35 +1086,52 @@
         function updateStats() {
             const startOfToday = getStartOfToday();
             const endOfToday = getEndOfToday();
-            
+
             // Filter entries that fall within today in the viewer's local timezone
             const todayEntries = entries.filter(e => {
                 const entryTime = e.timestamp;
                 return entryTime >= startOfToday && entryTime <= endOfToday;
             });
-            
-            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric' 
+
+            document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric'
             });
-            
+
             const fedEntries = todayEntries.filter(e => e.fed === 'Yes');
             document.getElementById('totalFeedings').textContent = fedEntries.length;
-            
+
             const totalOz = fedEntries.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
             document.getElementById('totalFormula').textContent = totalOz.toFixed(1);
-            
+
             const changedEntries = todayEntries.filter(e => e.changed === 'Yes');
             document.getElementById('totalChanges').textContent = changedEntries.length;
+
+            // Calculate total sleep time for today
+            const sleepEntries = todayEntries.filter(e => e.sleepStatus).sort((a, b) => a.timestamp - b.timestamp);
+            let totalSleepMinutes = 0;
+            let lastAsleepTime = null;
+
+            sleepEntries.forEach(entry => {
+                if (entry.sleepStatus === 'Asleep') {
+                    lastAsleepTime = entry.timestamp;
+                } else if (entry.sleepStatus === 'Awake' && lastAsleepTime) {
+                    const sleepDuration = entry.timestamp - lastAsleepTime;
+                    totalSleepMinutes += sleepDuration / (1000 * 60);
+                    lastAsleepTime = null;
+                }
+            });
+
+            document.getElementById('totalSleep').textContent = (totalSleepMinutes / 60).toFixed(1);
         }
 
         function renderEntries() {
             const tbody = document.getElementById('entriesBody');
-            
+
             if (entries.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="7" class="empty-state">
+                        <td colspan="8" class="empty-state">
                             <svg fill="currentColor" viewBox="0 0 20 20">
                                 <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
                                 <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
@@ -918,26 +1143,58 @@
                 return;
             }
 
-            tbody.innerHTML = entries
-                .sort((a, b) => b.timestamp - a.timestamp)
+            // Sort entries by timestamp for sleep duration calculation
+            const sortedEntries = [...entries].sort((a, b) => b.timestamp - a.timestamp);
+
+            // Calculate sleep duration for each entry
+            const entriesWithDuration = sortedEntries.map((entry, idx) => {
+                let sleepDuration = null;
+
+                if (entry.sleepStatus === 'Awake') {
+                    // Find the most recent "Asleep" entry before this "Awake" entry
+                    for (let i = idx + 1; i < sortedEntries.length; i++) {
+                        if (sortedEntries[i].sleepStatus === 'Asleep') {
+                            const durationMs = entry.timestamp - sortedEntries[i].timestamp;
+                            const hours = Math.floor(durationMs / (1000 * 60 * 60));
+                            const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+                            sleepDuration = `${hours}h ${minutes}m`;
+                            break;
+                        }
+                    }
+                }
+
+                return { ...entry, sleepDuration };
+            });
+
+            tbody.innerHTML = entriesWithDuration
                 .map((entry, index) => {
                     // Use the timezone-safe timestamp for display
                     const formattedDate = formatTimestamp(entry.timestamp);
-                    
-                    const fedBadge = entry.fed === 'Yes' 
-                        ? '<span class="badge badge-yes">Yes</span>' 
+
+                    const fedBadge = entry.fed === 'Yes'
+                        ? '<span class="badge badge-yes">Yes</span>'
                         : '<span class="badge badge-no">No</span>';
-                    
-                    const changedBadge = entry.changed === 'Yes' 
-                        ? '<span class="badge badge-yes">Yes</span>' 
+
+                    const changedBadge = entry.changed === 'Yes'
+                        ? '<span class="badge badge-yes">Yes</span>'
                         : '<span class="badge badge-no">No</span>';
-                    
+
                     let stateBadge = '';
                     if (entry.diaperState) {
                         const stateClass = entry.diaperState.toLowerCase();
                         stateBadge = `<span class="badge badge-${stateClass}">${entry.diaperState}</span>`;
                     }
-                    
+
+                    let sleepBadge = '';
+                    if (entry.sleepStatus) {
+                        const sleepClass = entry.sleepStatus.toLowerCase();
+                        let displayText = entry.sleepStatus;
+                        if (entry.sleepStatus === 'Awake' && entry.sleepDuration) {
+                            displayText += ` (${entry.sleepDuration})`;
+                        }
+                        sleepBadge = `<span class="badge badge-${sleepClass}">${displayText}</span>`;
+                    }
+
                     return `
                         <tr>
                             <td>${formattedDate}</td>
@@ -945,6 +1202,7 @@
                             <td>${entry.amount || '--'}</td>
                             <td>${changedBadge}</td>
                             <td>${stateBadge}</td>
+                            <td>${sleepBadge}</td>
                             <td>${entry.notes || '--'}</td>
                             <td>
                                 <button class="edit-btn" onclick="editEntry('${entry.id || ''}', ${index})">Edit</button>
@@ -982,6 +1240,7 @@
                 amount: document.getElementById('amount').value,
                 changed: document.getElementById('changed').value,
                 diaperState: document.getElementById('diaperState').value,
+                sleepStatus: document.getElementById('sleepStatus').value,
                 notes: document.getElementById('notes').value
             };
 
@@ -1006,7 +1265,7 @@
                 return;
             }
 
-            const headers = ['Date/Time', 'Fed?', 'Amount (oz)', 'Changed?', 'Diaper State', 'Notes'];
+            const headers = ['Date/Time', 'Fed?', 'Amount (oz)', 'Changed?', 'Diaper State', 'Sleep Status', 'Notes'];
             const csvContent = [
                 headers.join(','),
                 ...entries.map(e => [
@@ -1015,7 +1274,8 @@
                     e.amount || '',
                     e.changed,
                     e.diaperState || '',
-                    `"${e.notes || ''}"` 
+                    e.sleepStatus || '',
+                    `"${e.notes || ''}"`
                 ].join(','))
             ].join('\n');
 
